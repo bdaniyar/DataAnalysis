@@ -18,12 +18,9 @@ handler = RotatingFileHandler(str(BASE_DIR / "etl_pipeline.log"), maxBytes=1_000
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 
-# Avoid duplicate handlers if the module gets imported multiple times
 if not any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
     logger.addHandler(handler)
 
-
-# NOTE: email primary key is created in the initial CREATE TABLE statement.
 USERS_COLUMNS = {
     "gender": "TEXT",
     "first_name": "TEXT",
@@ -40,8 +37,6 @@ USERS_COLUMNS = {
 def ensure_users_table(conn: sqlite3.Connection) -> None:
     """Create/upgrade the `users` table to the expected schema."""
     cur = conn.cursor()
-
-    # Ensure table exists with primary key
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -50,11 +45,9 @@ def ensure_users_table(conn: sqlite3.Connection) -> None:
         """
     )
 
-    # Discover current columns
     cur.execute("PRAGMA table_info(users)")
-    existing_cols = {row[1] for row in cur.fetchall()}  # row[1] = column name
+    existing_cols = {row[1] for row in cur.fetchall()}  
 
-    # Add missing columns (idempotent)
     for col, col_type in USERS_COLUMNS.items():
         if col not in existing_cols:
             cur.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
@@ -89,31 +82,26 @@ def transform(df):
 
     df = df.copy()
 
-    # flatten
     df["first_name"] = df["name.first"]
     df["last_name"] = df["name.last"]
     df["age"] = df["dob.age"]
     df["dob_date"] = df["dob.date"]
 
-    # age_group
     df["age_group"] = pd.cut(
         df["age"],
         bins=[-1, 17, 30, 60, 200],
         labels=["Child", "Young Adult", "Adult", "Senior"],
     )
 
-    # email domain
     df["email_domain"] = df["email"].str.split("@").str[1]
 
-    # timestamp
+
     df["loaded_at"] = datetime.utcnow().isoformat()
 
-    # remove duplicates
     before = len(df)
     df = df.drop_duplicates(subset=["email"])
     logger.warning(f"Removed {before - len(df)} duplicate rows")
 
-    # drop missing email
     df = df.dropna(subset=["email"])
 
     df = df[
